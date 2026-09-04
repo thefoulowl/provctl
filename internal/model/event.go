@@ -11,7 +11,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Type identifies which BPF hook produced an Event.
@@ -117,8 +119,8 @@ func Decode(raw []byte, clock Clock) (Event, error) {
 		UID:      binary.LittleEndian.Uint32(raw[offUid:]),
 		GID:      binary.LittleEndian.Uint32(raw[offGid:]),
 		ExitCode: binary.LittleEndian.Uint32(raw[offExitCode:]),
-		Comm:     cString(raw[offComm : offComm+commLen]),
-		Filename: cString(raw[offFilename : offFilename+filenameLen]),
+		Comm:     SanitizeDisplay(cString(raw[offComm : offComm+commLen])),
+		Filename: SanitizeDisplay(cString(raw[offFilename : offFilename+filenameLen])),
 	}
 
 	if e.Type == TypeConnect {
@@ -145,4 +147,65 @@ func cString(b []byte) string {
 		return string(b[:i])
 	}
 	return string(b)
+}
+
+// SanitizeDisplay replaces anything in an attacker-controlled comm or filename
+// that could drive a terminal with U+FFFD: C0 controls other than TAB, DEL, the
+// C1 range U+0080..U+009F (0x9B is an 8-bit CSI), and bytes that aren't valid
+// UTF-8 (a lone 0x9B decodes as one of those; overlong forms are a filter
+// bypass). comm is set by the observed process itself (prctl(PR_SET_NAME) or
+// argv[0]) and a path may hold any byte but '/' and NUL, yet every provctl view
+// writes these straight to a terminal — without this a process could rewrite
+// its own lines in `provctl watch` or emit OSC/CSI at the operator's terminal.
+// Valid multi-byte runes (accented Latin, CJK, emoji, an already-present U+FFFD)
+// are preserved. Applied at capture (Decode, and the /proc seed in procscan) so
+// the live feed, the stored columns, and every reader are covered by one rule.
+func SanitizeDisplay(s string) string {
+	if displaySafe(s) {
+		return s // common case: no allocation
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if c := s[i]; c < utf8.RuneSelf {
+			if isUnsafeDisplayByte(c) {
+				b.WriteRune('�')
+			} else {
+				b.WriteByte(c)
+			}
+			i++
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if (r == utf8.RuneError && size == 1) || r <= 0x9f {
+			b.WriteRune('�')
+			i += size
+			continue
+		}
+		b.WriteString(s[i : i+size])
+		i += size
+	}
+	return b.String()
+}
+
+func displaySafe(s string) bool {
+	for i := 0; i < len(s); {
+		if c := s[i]; c < utf8.RuneSelf {
+			if isUnsafeDisplayByte(c) {
+				return false
+			}
+			i++
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if (r == utf8.RuneError && size == 1) || r <= 0x9f {
+			return false
+		}
+		i += size
+	}
+	return true
+}
+
+func isUnsafeDisplayByte(c byte) bool {
+	return (c < 0x20 && c != '\t') || c == 0x7f
 }
