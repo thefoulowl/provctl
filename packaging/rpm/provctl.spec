@@ -1,5 +1,5 @@
 Name:           provctl
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        eBPF process/file/network provenance tracker and flight recorder
 
@@ -49,5 +49,10 @@ install -Dm644 README.md %{buildroot}%{_datadir}/doc/%{name}/README.md
 %systemd_postun_with_restart provctl.service
 
 %changelog
+* Fri Sep 04 2026 thefoulowl <thefoulowl@proton.me> - 0.1.1-1
+- First installable release. 0.1.0 declared a Go toolchain constraint it
+  could not satisfy and carried a pid-reuse misattribution bug; do not
+  package it.
+
 * Fri Sep 04 2026 thefoulowl <thefoulowl@proton.me> - 0.1.0-1
 - Initial package.

@@ -1,6 +1,6 @@
 # Maintainer: thefoulowl <thefoulowl@proton.me>
 pkgname=provctl
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="eBPF process/file/network provenance tracker and flight recorder"
 arch=('x86_64')
