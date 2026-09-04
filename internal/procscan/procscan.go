@@ -80,7 +80,7 @@ func scanPID(pid int, boot time.Time) (model.Event, bool) {
 		Type: model.TypeExec,
 		Time: boot.Add(time.Duration(startTicks) * time.Second / userHZ),
 		PID:  uint32(pid),
-		PPID: uint32(ppid),
+		PPID: ppid,
 		Comm: comm,
 	}
 
@@ -104,7 +104,7 @@ func scanPID(pid int, boot time.Time) (model.Event, bool) {
 // spaces and parentheses (a process can set an arbitrary name), so the
 // fields after it are located from the *last* ')' rather than by splitting
 // the whole line on spaces.
-func parseStat(line string) (comm string, ppid int, startTicks uint64, err error) {
+func parseStat(line string) (comm string, ppid uint32, startTicks uint64, err error) {
 	openIdx := strings.IndexByte(line, '(')
 	closeIdx := strings.LastIndexByte(line, ')')
 	if openIdx < 0 || closeIdx < 0 || closeIdx < openIdx {
@@ -122,9 +122,11 @@ func parseStat(line string) (comm string, ppid int, startTicks uint64, err error
 	if len(rest) <= starttimeIdx {
 		return "", 0, 0, fmt.Errorf("procscan: stat line has %d fields after comm, want > %d", len(rest), starttimeIdx)
 	}
-	if ppid, err = strconv.Atoi(rest[ppidIdx]); err != nil {
+	var parsedPPID uint64
+	if parsedPPID, err = strconv.ParseUint(rest[ppidIdx], 10, 32); err != nil {
 		return "", 0, 0, fmt.Errorf("procscan: parse ppid: %w", err)
 	}
+	ppid = uint32(parsedPPID)
 	if startTicks, err = strconv.ParseUint(rest[starttimeIdx], 10, 64); err != nil {
 		return "", 0, 0, fmt.Errorf("procscan: parse starttime: %w", err)
 	}
