@@ -1,22 +1,22 @@
 # provctl
 
+[![CI](https://img.shields.io/github/actions/workflow/status/thefoulowl/provctl/ci.yml?branch=main&label=CI)](https://github.com/thefoulowl/provctl/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/thefoulowl/provctl.svg)](https://pkg.go.dev/github.com/thefoulowl/provctl)
+[![License: MIT](https://img.shields.io/github/license/thefoulowl/provctl)](LICENSE)
+[![Latest tag](https://img.shields.io/github/v/tag/thefoulowl/provctl)](https://github.com/thefoulowl/provctl/tags)
+
 An eBPF process/file/network **provenance tracker and flight recorder** for
 Linux. One capture engine answers two questions:
 
 - **"Where did this file come from?"** — `provctl trace <path>`
 - **"What did this process do?"** — `provctl timeline <pid>`
 
-```
-$ provctl trace ~/Downloads/payload.sh
-cp (pid 132382)
-  ↓ opened /home/user/Downloads/payload.sh                (08:49:49)
-  ↓ opened by bash (pid 132380)                            (08:49:49)
-  ↓ executed as payload.sh (pid 132384)                    (08:49:49)
-        -> spawned curl (pid 132385)                       (08:49:49)
-```
+![provctl demo: tracing a payload's provenance, then the live top dashboard](docs/assets/demo.gif)
 
-That output is from a real recorded run — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-for how it's reconstructed and what it can't yet track.
+The recording above runs real commands against a real, live `provctl watch`
+on the developer's own machine — the output is genuine capture, not mocked
+data. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how it's
+reconstructed and what it can't yet track.
 
 ## How it works
 
