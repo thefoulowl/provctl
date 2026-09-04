@@ -85,10 +85,11 @@ sudo provctl watch
 provctl trace /home/you/Downloads/something.zip
 provctl timeline 12345
 provctl ps
+provctl top    # live dashboard: process tree + scrolling activity feed
 ```
 
 (If you skipped the `sudo install` step above: use `sudo ./provctl watch`
-for step 1, and `./provctl trace/timeline/ps` for step 2.)
+for step 1, and `./provctl trace/timeline/ps/top` for step 2.)
 
 | Command | Needs root? | What it does |
 |---|---|---|
@@ -96,6 +97,11 @@ for step 1, and `./provctl trace/timeline/ps` for step 2.)
 | `provctl trace <path> [--db path]` | no | Reconstructs a file's provenance: who created it, who reopened it, who executed it, what that run did next. |
 | `provctl timeline <pid> [--db path]` | no | Every recorded event for one process, merged and time-sorted. |
 | `provctl ps [--db path] [--all]` | no | The recorded process tree (live only by default; `--all` includes exited processes). |
+| `provctl top [--db path]` | no | A live TUI: process tree on the left, scrolling activity feed on the right — reads the same database `watch` is writing to, from a separate process. `tab` switches pane focus, `↑`/`↓`/`j`/`k`/page keys scroll, `q` quits. |
+
+`watch`'s own scrolling output is colorized when attached to a terminal
+(auto-plain when piped to a file or run under systemd/journald, and honors
+`NO_COLOR`).
 
 Database path defaults to `/var/lib/provctl/events.db`, override with
 `--db` or `$PROVCTL_DB`. `trace`/`timeline`/`ps` only need read access to

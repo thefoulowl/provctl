@@ -12,6 +12,7 @@ import (
 	"github.com/thefoulowl/provctl/internal/model"
 	"github.com/thefoulowl/provctl/internal/procscan"
 	"github.com/thefoulowl/provctl/internal/store"
+	"github.com/thefoulowl/provctl/internal/ui"
 )
 
 // Events are batched into one SQLite transaction instead of one fsync per
@@ -47,7 +48,7 @@ func runWatch(ctx context.Context, args []string) error {
 	// process instead of a bare pid we never saw start.
 	if snapshot, err := procscan.Snapshot(os.Getpid()); err != nil {
 		fmt.Fprintln(os.Stderr, "provctl: /proc snapshot failed, pre-existing processes will show as bare pids:", err)
-	} else if err := st.ApplyBatch(snapshot); err != nil {
+	} else if err := st.Seed(snapshot); err != nil {
 		return fmt.Errorf("cli: seed store from /proc: %w", err)
 	} else {
 		fmt.Fprintf(os.Stderr, "provctl: seeded %d already-running processes from /proc\n", len(snapshot))
@@ -64,6 +65,8 @@ func runWatch(ctx context.Context, args []string) error {
 	go func() { errCh <- eng.Events(ctx, events) }()
 
 	fmt.Fprintf(os.Stderr, "provctl: watching (db=%s) — Ctrl+C to stop\n", *dbPath)
+
+	colorer := ui.NewColorer(ui.Enabled(os.Stdout))
 
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
@@ -83,7 +86,7 @@ func runWatch(ctx context.Context, args []string) error {
 		select {
 		case ev := <-events:
 			if !*quiet {
-				printEvent(ev)
+				printEvent(ev, colorer)
 			}
 			batch = append(batch, ev)
 			if len(batch) >= batchMax {
@@ -101,18 +104,29 @@ func runWatch(ctx context.Context, args []string) error {
 	}
 }
 
-func printEvent(ev model.Event) {
-	ts := ev.Time.Format("15:04:05.000")
+// eventColumnWidth is the padded width of the event-type label, so the
+// description text lines up in a column regardless of which event fired.
+const eventColumnWidth = 7 // len("CONNECT")
+
+func printEvent(ev model.Event, c ui.Colorer) {
+	ts := c.Dim(ev.Time.Format("15:04:05.000"))
+	label := fmt.Sprintf("%-*s", eventColumnWidth, ev.Type.String())
+
+	var colored string
 	switch ev.Type {
 	case model.TypeFork:
-		fmt.Printf("%s FORK    ppid=%d -> pid=%d (%s)\n", ts, ev.PPID, ev.PID, ev.Comm)
+		colored = c.Fork(label)
 	case model.TypeExec:
-		fmt.Printf("%s EXEC    pid=%d ppid=%d %s (%s)\n", ts, ev.PID, ev.PPID, ev.Filename, ev.Comm)
+		colored = c.Exec(label)
 	case model.TypeExit:
-		fmt.Printf("%s EXIT    pid=%d code=%d (%s)\n", ts, ev.PID, ev.ExitCode, ev.Comm)
+		colored = c.Exit(label)
 	case model.TypeFileOpen:
-		fmt.Printf("%s OPEN    pid=%d %s (%s)\n", ts, ev.PID, ev.Filename, ev.Comm)
+		colored = c.Open(label)
 	case model.TypeConnect:
-		fmt.Printf("%s CONNECT pid=%d -> %s:%d (%s)\n", ts, ev.PID, ev.DstIP, ev.DstPort, ev.Comm)
+		colored = c.Connect(label)
+	default:
+		colored = label
 	}
+
+	fmt.Printf("%s %s %s\n", ts, colored, ev.Describe())
 }

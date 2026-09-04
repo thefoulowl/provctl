@@ -323,3 +323,96 @@ func TestApplyBatchEmptyIsNoop(t *testing.T) {
 		t.Fatalf("ApplyBatch(nil): %v", err)
 	}
 }
+
+// Regression test: Seed exists specifically so the /proc startup backfill
+// doesn't flood provctl top's live feed with hundreds of synthetic "exec"
+// entries every time watch starts. If Seed ever starts writing to
+// activity_log the same way Apply does, that guarantee silently breaks.
+func TestSeedDoesNotWriteActivityLog(t *testing.T) {
+	st := newTestStore(t)
+
+	seedEvents := []model.Event{
+		{Type: model.TypeExec, Time: at(0), PID: 1, Comm: "systemd", Filename: "/usr/lib/systemd/systemd"},
+		{Type: model.TypeExec, Time: at(time.Second), PID: 2, Comm: "bash", Filename: "/usr/bin/bash"},
+	}
+	if err := st.Seed(seedEvents); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	entries, err := st.RecentActivity(10)
+	if err != nil {
+		t.Fatalf("RecentActivity: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Seed wrote %d activity_log entries, want 0: %+v", len(entries), entries)
+	}
+
+	// but the processes table itself must still be populated normally
+	p, err := st.LatestProcess(1)
+	if err != nil {
+		t.Fatalf("LatestProcess: %v", err)
+	}
+	if p == nil || p.Comm != "systemd" {
+		t.Errorf("Seed did not populate the processes table: %+v", p)
+	}
+}
+
+func TestApplyWritesActivityLogInOrder(t *testing.T) {
+	st := newTestStore(t)
+
+	events := []model.Event{
+		{Type: model.TypeFork, Time: at(0), PID: 10, PPID: 1, Comm: "sh"},
+		{Type: model.TypeExec, Time: at(time.Second), PID: 10, PPID: 1, Comm: "sh", Filename: "/bin/sh"},
+		{Type: model.TypeExit, Time: at(2 * time.Second), PID: 10, Comm: "sh", ExitCode: 0},
+	}
+	applyAll(t, st, events...)
+
+	entries, err := st.RecentActivity(10)
+	if err != nil {
+		t.Fatalf("RecentActivity: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d activity_log entries, want 3", len(entries))
+	}
+	wantKinds := []string{"FORK", "EXEC", "EXIT"}
+	for i, e := range entries {
+		if e.Kind != wantKinds[i] {
+			t.Errorf("entry %d kind = %q, want %q", i, e.Kind, wantKinds[i])
+		}
+		if i > 0 && e.ID <= entries[i-1].ID {
+			t.Errorf("entry %d id %d not increasing after %d", i, e.ID, entries[i-1].ID)
+		}
+	}
+}
+
+func TestActivityAfterOnlyReturnsNewerEntries(t *testing.T) {
+	st := newTestStore(t)
+	applyAll(t, st,
+		model.Event{Type: model.TypeFork, Time: at(0), PID: 1, PPID: 0, Comm: "a"},
+		model.Event{Type: model.TypeFork, Time: at(time.Second), PID: 2, PPID: 0, Comm: "b"},
+		model.Event{Type: model.TypeFork, Time: at(2 * time.Second), PID: 3, PPID: 0, Comm: "c"},
+	)
+
+	first, err := st.RecentActivity(10)
+	if err != nil {
+		t.Fatalf("RecentActivity: %v", err)
+	}
+	if len(first) != 3 {
+		t.Fatalf("got %d entries, want 3", len(first))
+	}
+
+	cursor := first[1].ID // pretend we've already seen the first two
+	next, err := st.ActivityAfter(cursor, 10)
+	if err != nil {
+		t.Fatalf("ActivityAfter: %v", err)
+	}
+	if len(next) != 1 || next[0].PID != 3 {
+		t.Fatalf("ActivityAfter(%d) = %+v, want just pid 3's entry", cursor, next)
+	}
+
+	if empty, err := st.ActivityAfter(next[0].ID, 10); err != nil {
+		t.Fatalf("ActivityAfter: %v", err)
+	} else if len(empty) != 0 {
+		t.Errorf("ActivityAfter at the latest id returned %d entries, want 0", len(empty))
+	}
+}

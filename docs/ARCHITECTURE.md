@@ -23,13 +23,15 @@ not a separate subsystem.
                         └─────────────────────────▶│  processes           │
                                                     │  file_events         │
                                                     │  net_events          │
+                                                    │  activity_log        │
                                                     └──────────┬────────────┘
                                                                │
-                                       ┌───────────────────────┼───────────────────────┐
-                                       ▼                       ▼                       ▼
-                                `provctl trace`         `provctl timeline`      `provctl ps`
-                                file provenance           process flight          process tree
-                                                             recorder
+                            ┌──────────────────┬───────────────┼───────────────────┬──────────────────┐
+                            ▼                  ▼               ▼                   ▼
+                     `provctl trace`   `provctl timeline`  `provctl ps`      `provctl top`
+                     file provenance    process flight      process tree     live TUI (separate
+                                          recorder                            process, polls the
+                                                                              same store)
 ```
 
 ## Why these five hooks
@@ -84,6 +86,24 @@ expose the same fields, without recompiling per-target.
      file it opened, every connection it made, and every child it spawned,
      sorted by time.
    - **`ps`** — the process tree reconstructed from `processes.ppid`.
+   - **`top`** — a live TUI (bubbletea/lipgloss) that polls the same store
+     from a separate process while `watch` writes to it: a process tree
+     (from `AllProcesses`, shared with `ps`'s rendering) alongside a
+     scrolling `activity_log` feed. `activity_log` is a plain append-only
+     table — one rendered line per live-observed event, via the same
+     `model.Event.Describe()` `watch`'s own scrolling output uses — kept
+     separate from `processes`/`file_events`/`net_events` specifically so
+     `top` doesn't have to re-derive a chronological feed from tables whose
+     rows mutate in place (a process's row is updated by EXEC, then again
+     by EXIT). The `/proc` startup backfill (step 0 above) does **not**
+     write to `activity_log` — those are synthetic, not live-observed, and
+     logging hundreds of them at every `watch` startup would flood the feed.
+     `top`'s incremental poll query is intentionally *not* capped at the
+     same small limit as what's displayed: a single chatty process (a
+     browser polling `/proc`, observed in testing generating 1000+ events
+     well under a second) can otherwise outpace a tightly-bounded fetch,
+     permanently widening the gap between the feed and "now" instead of
+     catching up between bursts.
 
 ## Known limitations (v1)
 

@@ -30,6 +30,17 @@ func runPS(args []string) error {
 		return nil
 	}
 
+	for _, line := range renderProcessTree(procs) {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+// renderProcessTree lays out procs as a parent/child tree, root processes
+// (whose parent isn't itself in procs — either pid 1, or a process whose
+// own parent predates this recording) first. Shared by `provctl ps`
+// (printed directly) and `provctl top` (put in a scrolling pane).
+func renderProcessTree(procs []store.Process) []string {
 	byParent := map[uint32][]store.Process{}
 	known := map[uint32]bool{}
 	for _, p := range procs {
@@ -46,14 +57,15 @@ func runPS(args []string) error {
 		}
 	}
 
+	var lines []string
 	seen := map[uint32]bool{}
 	for _, r := range roots {
-		printTree(r, byParent, 0, seen)
+		appendTree(&lines, r, byParent, 0, seen)
 	}
-	return nil
+	return lines
 }
 
-func printTree(p store.Process, byParent map[uint32][]store.Process, depth int, seen map[uint32]bool) {
+func appendTree(lines *[]string, p store.Process, byParent map[uint32][]store.Process, depth int, seen map[uint32]bool) {
 	if seen[p.PID] {
 		return // guards against a cycle in malformed/replayed data
 	}
@@ -75,9 +87,9 @@ func printTree(p store.Process, byParent map[uint32][]store.Process, depth int, 
 	if depth > 0 {
 		prefix += "└─ "
 	}
-	fmt.Printf("%s%s (pid %d, %s)\n", prefix, p.Comm, p.PID, status)
+	*lines = append(*lines, fmt.Sprintf("%s%s (pid %d, %s)", prefix, p.Comm, p.PID, status))
 
 	for _, c := range byParent[p.PID] {
-		printTree(c, byParent, depth+1, seen)
+		appendTree(lines, c, byParent, depth+1, seen)
 	}
 }

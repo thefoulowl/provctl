@@ -50,6 +50,18 @@ CREATE TABLE IF NOT EXISTS net_events (
 	ts_ns    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_net_events_pid ON net_events(pid);
+
+-- One row per live-observed event (not the /proc startup backfill — see
+-- Seed vs Apply below), rendered text and all, so "provctl top" can tail
+-- it with a plain id-ordered poll instead of re-deriving a feed from the
+-- other tables' mutable state.
+CREATE TABLE IF NOT EXISTS activity_log (
+	id    INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts_ns INTEGER NOT NULL,
+	kind  TEXT NOT NULL,
+	pid   INTEGER NOT NULL,
+	text  TEXT NOT NULL
+);
 `
 
 // Store wraps a SQLite database holding the durable event history.
@@ -93,24 +105,39 @@ type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// Apply persists one decoded event in its own transaction. Prefer
-// ApplyBatch when applying many events at once (e.g. draining a channel).
+// Apply persists one live-observed event in its own transaction, including
+// an activity_log entry for `provctl top`. Prefer ApplyBatch when applying
+// many events at once (e.g. draining a channel).
 func (s *Store) Apply(e model.Event) error {
 	return apply(s.db, e)
 }
 
-// ApplyBatch persists many events as a single transaction, so a burst of
-// events costs one fsync instead of one per event.
+// ApplyBatch persists many live-observed events as a single transaction,
+// so a burst of events costs one fsync instead of one per event.
 func (s *Store) ApplyBatch(events []model.Event) error {
+	return runBatch(s.db, events, apply)
+}
+
+// Seed persists events representing already-known state rather than
+// live-observed activity — specifically, the /proc snapshot `watch` takes
+// at startup so pre-existing processes have a name. Unlike Apply/ApplyBatch,
+// this does not write to activity_log: those synthetic "exec" events aren't
+// something that just happened, and logging all of them would flood
+// `provctl top`'s live feed with hundreds of entries every time watch starts.
+func (s *Store) Seed(events []model.Event) error {
+	return runBatch(s.db, events, applyCore)
+}
+
+func runBatch(db *sql.DB, events []model.Event, applyFn func(execer, model.Event) error) error {
 	if len(events) == 0 {
 		return nil
 	}
-	tx, err := s.db.Begin()
+	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("store: begin batch: %w", err)
 	}
 	for _, e := range events {
-		if err := apply(tx, e); err != nil {
+		if err := applyFn(tx, e); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -118,7 +145,21 @@ func (s *Store) ApplyBatch(events []model.Event) error {
 	return tx.Commit()
 }
 
+// apply persists one event's effect on the derived tables (via applyCore)
+// and, since this path is for live-observed activity, appends it to
+// activity_log for provctl top.
 func apply(q execer, e model.Event) error {
+	if err := applyCore(q, e); err != nil {
+		return err
+	}
+	_, err := q.Exec(
+		`INSERT INTO activity_log (ts_ns, kind, pid, text) VALUES (?, ?, ?, ?)`,
+		e.Time.UnixNano(), e.Type.String(), e.PID, e.Describe(),
+	)
+	return err
+}
+
+func applyCore(q execer, e model.Event) error {
 	ts := e.Time.UnixNano()
 	switch e.Type {
 	case model.TypeFork:

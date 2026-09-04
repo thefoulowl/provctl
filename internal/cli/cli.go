@@ -1,4 +1,4 @@
-// Package cli implements provctl's subcommands: watch, trace, timeline, ps.
+// Package cli implements provctl's subcommands: watch, trace, timeline, ps, top.
 package cli
 
 import (
@@ -30,6 +30,8 @@ func Run(ctx context.Context, args []string) error {
 		return runTimeline(args[1:])
 	case "ps":
 		return runPS(args[1:])
+	case "top":
+		return runTop(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -47,6 +49,7 @@ Usage:
   provctl trace    <path>      [--db path] reconstruct a file's provenance: where it came from, who ran it
   provctl timeline <pid>       [--db path] show everything recorded about one process's life
   provctl ps                   [--db path] list recorded processes as a tree
+  provctl top                  [--db path] live TUI: process tree + scrolling activity feed
 
 Flags:
   --db path   sqlite database path (default: $PROVCTL_DB or /var/lib/provctl/events.db)
