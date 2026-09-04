@@ -3,6 +3,15 @@ Version:        0.1.1
 Release:        1%{?dist}
 Summary:        eBPF process/file/network provenance tracker and flight recorder
 
+# The binary is built with -trimpath (reproducible builds: no local build-path
+# leakage), which removes the absolute source paths rpm's automatic
+# debuginfo/debugsource split relies on -- with it left enabled, rpmbuild
+# fails outright ("Empty %files file ...debugsourcefiles.list") because
+# there are no real paths left to attribute debug symbols to. Standard
+# practice for Go (and Rust) packages; confirmed by reproducing the failure
+# and fixing it here.
+%global debug_package %{nil}
+
 License:        MIT
 URL:            https://github.com/thefoulowl/provctl
 Source0:        https://github.com/thefoulowl/provctl/archive/refs/tags/v%{version}.tar.gz
@@ -25,7 +34,7 @@ exposing BTF at /sys/kernel/btf/vmlinux.
 %autosetup -n %{name}-%{version}
 
 %build
-CGO_ENABLED=0 go build -o provctl ./cmd/provctl
+CGO_ENABLED=0 go build -trimpath -o provctl ./cmd/provctl
 
 %install
 install -Dm755 provctl %{buildroot}%{_bindir}/provctl

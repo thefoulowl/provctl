@@ -39,7 +39,7 @@ most distro kernels since ~5.8 / 2021).
 ```sh
 git clone https://github.com/thefoulowl/provctl
 cd provctl
-go build -o provctl ./cmd/provctl
+go build -trimpath -o provctl ./cmd/provctl
 sudo install -Dm755 provctl /usr/local/bin/provctl
 ```
 

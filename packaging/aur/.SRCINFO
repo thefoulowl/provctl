@@ -1,0 +1,13 @@
+pkgbase = provctl
+	pkgdesc = eBPF process/file/network provenance tracker and flight recorder
+	pkgver = 0.1.1
+	pkgrel = 1
+	url = https://github.com/thefoulowl/provctl
+	arch = x86_64
+	license = MIT
+	makedepends = go>=1.25
+	optdepends = systemd: run provctl watch as a service
+	source = provctl-0.1.1.tar.gz::https://github.com/thefoulowl/provctl/archive/refs/tags/v0.1.1.tar.gz
+	sha256sums = f2b85a137f4847c20c48920ee7dfb3602d744d8e013371bc1f2edc3f25130da7
+
+pkgname = provctl

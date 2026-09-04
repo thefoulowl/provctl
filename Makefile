@@ -19,7 +19,7 @@ generate: vmlinux-header
 	cd internal/engine && GOPACKAGE=engine $(GO) generate ./...
 
 build:
-	$(GO) build -o provctl ./cmd/provctl
+	$(GO) build -trimpath -o provctl ./cmd/provctl
 
 vet:
 	$(GO) vet ./...
