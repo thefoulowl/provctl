@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>provctl — eBPF provenance tracker &amp; flight recorder</title>
+<meta name="description" content="An eBPF process/file/network provenance tracker and flight recorder for Linux. Answers where did this file come from and what did this process do.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%8D%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:        #14141f;
+    --bg-panel:  #1b1b2b;
+    --bg-code:   #101018;
+    --border:    #2c2c40;
+    --fg:        #e6e6f0;
+    --fg-dim:    #9a9ab0;
+    --accent:    #bd93f9;
+    --accent-2:  #8be9fd;
+    --accent-3:  #50fa7b;
+    --accent-4:  #ff79c6;
+    --danger:    #ff5555;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+  }
+  a { color: var(--accent-2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre, .mono { font-family: var(--font-mono); }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(20,20,31,0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  header.nav .wrap {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px;
+  }
+  header.nav .brand {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--fg);
+    display: flex; align-items: center; gap: 8px;
+  }
+  header.nav .brand .prompt { color: var(--accent-3); }
+  header.nav nav { display: flex; gap: 22px; font-size: 0.92rem; }
+  header.nav nav a { color: var(--fg-dim); }
+  header.nav nav a:hover { color: var(--fg); text-decoration: none; }
+
+  .hero {
+    padding: 72px 0 48px;
+    text-align: center;
+  }
+  .hero h1 {
+    font-size: clamp(2.2rem, 5vw, 3.4rem);
+    margin: 0 0 14px;
+    letter-spacing: -0.02em;
+  }
+  .hero h1 .mono { color: var(--accent); }
+  .hero p.tagline {
+    font-size: 1.2rem;
+    color: var(--fg-dim);
+    max-width: 640px;
+    margin: 0 auto 30px;
+  }
+  .hero .questions {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 14px;
+    margin-bottom: 36px;
+  }
+  .hero .questions span {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-size: 0.95rem;
+    color: var(--fg);
+  }
+  .hero .questions .q { color: var(--accent-2); }
+  .hero .cta {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 12px;
+    margin-bottom: 44px;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border: 1px solid var(--border);
+  }
+  .btn:hover { text-decoration: none; }
+  .btn.primary {
+    background: var(--accent);
+    color: #14141f;
+    border-color: var(--accent);
+  }
+  .btn.primary:hover { background: #cba7ff; }
+  .btn.ghost {
+    background: transparent;
+    color: var(--fg);
+  }
+  .btn.ghost:hover { background: var(--bg-panel); }
+
+  .demo-frame {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px -30px rgba(189, 147, 249, 0.25);
+    background: var(--bg-code);
+  }
+  .demo-frame img { display: block; width: 100%; height: auto; }
+
+  section { padding: 64px 0; border-top: 1px solid var(--border); }
+  section h2 {
+    font-size: 1.7rem;
+    margin: 0 0 8px;
+  }
+  section p.lead {
+    color: var(--fg-dim);
+    max-width: 640px;
+    margin: 0 0 36px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px;
+  }
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 1.02rem;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card h3 .mono { color: var(--accent-3); font-size: 0.95em; }
+  .card p { margin: 0; color: var(--fg-dim); font-size: 0.92rem; }
+
+  .diagram {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    overflow-x: auto;
+  }
+  .diagram pre {
+    margin: 0;
+    color: var(--accent-2);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  .diagram pre .dim { color: var(--fg-dim); }
+  .diagram pre .hi { color: var(--accent-3); }
+
+  .install-tabs {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 14px;
+  }
+  .install-tabs button {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-panel);
+    color: var(--fg-dim);
+    cursor: pointer;
+  }
+  .install-tabs button.active {
+    color: var(--bg);
+    background: var(--accent-2);
+    border-color: var(--accent-2);
+  }
+  .code-block {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    display: none;
+  }
+  .code-block.active { display: block; }
+  .code-block pre { margin: 0; font-size: 0.88rem; overflow-x: auto; }
+  .code-block .c1 { color: var(--fg-dim); }
+  .code-block .cmd { color: var(--accent-3); }
+
+  table.cmds {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  table.cmds th, table.cmds td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.cmds th { color: var(--fg-dim); font-weight: 600; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  table.cmds code { color: var(--accent-3); }
+  table.cmds .tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+  }
+  table.cmds .tag.root { background: rgba(255,85,85,0.15); color: var(--danger); }
+  table.cmds .tag.user { background: rgba(80,250,123,0.12); color: var(--accent-3); }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 36px 0 60px;
+    color: var(--fg-dim);
+    font-size: 0.88rem;
+  }
+  footer .wrap {
+    display: flex; flex-wrap: wrap; gap: 10px 24px;
+    align-items: center; justify-content: space-between;
+  }
+  footer .links { display: flex; gap: 18px; flex-wrap: wrap; }
+
+  .limits {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-4);
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-size: 0.9rem;
+    color: var(--fg-dim);
+  }
+  .limits strong { color: var(--fg); }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <div class="brand"><span class="prompt">&gt;</span> provctl</div>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+      <a href="#usage">Usage</a>
+      <a href="https://github.com/thefoulowl/provctl/wiki">Wiki</a>
+      <a href="https://github.com/thefoulowl/provctl">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero wrap">
+  <h1>eBPF provenance tracking,<br>for when you need to <span class="mono">know what happened.</span></h1>
+  <p class="tagline">
+    provctl is a process/file/network provenance tracker and flight recorder
+    for Linux. One capture engine, backed by five eBPF hooks, answers the
+    two questions a forensics tool actually exists for.
+  </p>
+  <div class="questions">
+    <span><span class="q">"Where did this file come from?"</span> — provctl trace</span>
+    <span><span class="q">"What did this process do?"</span> — provctl timeline</span>
+  </div>
+  <div class="cta">
+    <a class="btn primary" href="#install">Get started</a>
+    <a class="btn ghost" href="https://github.com/thefoulowl/provctl">View on GitHub</a>
+  </div>
+  <div class="demo-frame">
+    <img src="assets/demo.gif" alt="Terminal recording: provctl trace reconstructing a payload's provenance chain, then the live provctl top dashboard" loading="lazy">
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <h2>One capture engine, several views</h2>
+    <p class="lead">
+      The kernel side stays deliberately dumb: capture events, tag them with
+      identity, hand them to userspace. Every interesting question is a
+      query over one durable event log, not a separate subsystem.
+    </p>
+    <div class="grid">
+      <div class="card">
+        <h3>🛰️ <span class="mono">watch</span></h3>
+        <p>Attaches five eBPF hooks (fork/exec/exit, file opens, TCP connects) and streams live, colorized events to a persistent SQLite store.</p>
+      </div>
+      <div class="card">
+        <h3>🔎 <span class="mono">trace</span></h3>
+        <p>Reconstructs a file's provenance: who wrote it, who reopened it, who executed it, and what that execution did next.</p>
+      </div>
+      <div class="card">
+        <h3>🎞️ <span class="mono">timeline</span></h3>
+        <p>The full recorded life of one process — every file it opened, every connection it made, every child it spawned — merged and sorted by time.</p>
+      </div>
+      <div class="card">
+        <h3>🌳 <span class="mono">ps</span></h3>
+        <p>The recorded process tree, reconstructed from parent/child relationships captured at fork time.</p>
+      </div>
+      <div class="card">
+        <h3>📊 <span class="mono">top</span></h3>
+        <p>A live TUI: process tree on the left, scrolling activity feed on the right — a separate, unprivileged process reading the same store <span class="mono">watch</span> is writing to.</p>
+      </div>
+      <div class="card">
+        <h3>🧩 CO-RE eBPF</h3>
+        <p>Compiled once, runs across kernel versions that expose the same fields — no recompiling per target, no kernel headers needed at runtime.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <h2>Architecture</h2>
+    <p class="lead">
+      Five eBPF hooks feed one ring buffer. A Go daemon decodes that stream
+      and persists it to SQLite (WAL mode, batched writes). Every CLI
+      command is a read-only query over that same store.
+    </p>
+    <div class="diagram">
+<pre><span class="dim">                 kernel                          userspace</span>
+    <span class="dim">┌─────────────────────────────┐   ┌──────────────────────────────┐</span>
+    <span class="dim">│</span> tp/sched_process_fork        <span class="dim">│   │                              │</span>
+    <span class="dim">│</span> tp/sched_process_exec        <span class="dim">│   │</span>  engine.Engine               <span class="dim">│</span>
+    <span class="dim">│</span> tp/sched_process_exit        <span class="dim">│──▶│</span>   - loads probes (bpf2go)    <span class="dim">│</span>
+    <span class="dim">│</span> fentry/security_file_open    <span class="dim">│   │</span>   - attaches all hooks       <span class="dim">│</span>
+    <span class="dim">│</span> fentry/tcp_v4_connect        <span class="dim">│   │</span>   - reads BPF ring buffer    <span class="dim">│</span>
+    <span class="dim">│</span> fentry/tcp_v6_connect        <span class="dim">│   │</span>   - decodes -&gt; model.Event   <span class="dim">│</span>
+    <span class="dim">└──────────────┬────────────────┘   └───────────────┬──────────────┘</span>
+                    <span class="dim">│</span> BPF ring buffer                    <span class="dim">│</span>
+                    <span class="dim">│</span> (struct event, provctl.h)          ▼
+                    <span class="dim">│                          ┌──────────────────────┐</span>
+                    <span class="dim">│                          │</span> store.Store <span class="dim">(SQLite)</span> <span class="dim">│</span>
+                    <span class="dim">└─────────────────────────▶│</span>  processes           <span class="dim">│</span>
+                                                <span class="dim">│</span>  file_events         <span class="dim">│</span>
+                                                <span class="dim">│</span>  net_events           <span class="dim">│</span>
+                                                <span class="dim">│</span>  activity_log         <span class="dim">│</span>
+                                                <span class="dim">└──────────┬────────────┘</span>
+                                                           <span class="dim">│</span>
+                        <span class="hi">┌──────────────────┬───────────────┼───────────────────┬──────────────────┐</span>
+                        ▼                  ▼               ▼                   ▼
+                 <span class="hi">provctl trace</span>   <span class="hi">provctl timeline</span>  <span class="hi">provctl ps</span>      <span class="hi">provctl top</span>
+</pre>
+    </div>
+    <p style="margin-top:18px;"><a href="https://github.com/thefoulowl/provctl/wiki/Architecture">Full write-up on the wiki →</a></p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="lead">No C dependencies — both eBPF and SQLite bindings are pure Go, so it's a single static binary.</p>
+
+    <div class="install-tabs">
+      <button class="active" data-tab="src">From source</button>
+      <button data-tab="go">go install</button>
+      <button data-tab="rpm">Fedora / RHEL</button>
+      <button data-tab="deb">Debian / Ubuntu</button>
+      <button data-tab="aur">Arch (AUR)</button>
+    </div>
+
+    <div class="code-block active" id="tab-src">
+<pre><span class="c1"># clone, build, install globally (needed so `sudo provctl watch` can find it)</span>
+<span class="cmd">git clone https://github.com/thefoulowl/provctl</span>
+<span class="cmd">cd provctl</span>
+<span class="cmd">go build -trimpath -o provctl ./cmd/provctl</span>
+<span class="cmd">sudo install -Dm755 provctl /usr/local/bin/provctl</span></pre>
+    </div>
+    <div class="code-block" id="tab-go">
+<pre><span class="cmd">go install github.com/thefoulowl/provctl/cmd/provctl@latest</span>
+<span class="c1"># lands in $(go env GOPATH)/bin — put that on PATH.
+# note: sudo provctl watch needs the binary on root's PATH too,
+# which ~/go/bin usually isn't. See the README for the full story.</span></pre>
+    </div>
+    <div class="code-block" id="tab-rpm">
+<pre><span class="cmd">rpmbuild -bb packaging/rpm/provctl.spec</span>
+<span class="c1"># or via Fedora COPR, once published — see the wiki</span></pre>
+    </div>
+    <div class="code-block" id="tab-deb">
+<pre><span class="cmd">cd packaging/deb</span>
+<span class="cmd">dpkg-buildpackage -us -uc -b</span></pre>
+    </div>
+    <div class="code-block" id="tab-aur">
+<pre><span class="cmd">cd packaging/aur</span>
+<span class="cmd">makepkg -si</span></pre>
+    </div>
+
+    <p style="margin-top:16px;">Requires a kernel exposing BTF at <code>/sys/kernel/btf/vmlinux</code> (5.8+, default on most distros since ~2021).</p>
+  </div>
+</section>
+
+<section id="usage">
+  <div class="wrap">
+    <h2>Usage</h2>
+    <p class="lead">Start capturing as root, then ask questions from anywhere — the read-only commands need no privileges beyond file access.</p>
+    <table class="cmds">
+      <thead>
+        <tr><th>Command</th><th>Access</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>provctl watch</code></td><td><span class="tag root">root</span></td><td>Attaches the probes, streams events, persists them to SQLite.</td></tr>
+        <tr><td><code>provctl trace &lt;path&gt;</code></td><td><span class="tag user">unprivileged</span></td><td>Reconstructs a file's provenance chain.</td></tr>
+        <tr><td><code>provctl timeline &lt;pid&gt;</code></td><td><span class="tag user">unprivileged</span></td><td>Every recorded event for one process, time-sorted.</td></tr>
+        <tr><td><code>provctl ps</code></td><td><span class="tag user">unprivileged</span></td><td>The recorded process tree.</td></tr>
+        <tr><td><code>provctl top</code></td><td><span class="tag user">unprivileged</span></td><td>Live TUI: process tree + scrolling activity feed.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="limitations">
+  <div class="wrap">
+    <h2>Known limitations</h2>
+    <div class="limits">
+      <strong>v1</strong> matches file provenance by exact path string (no inode/rename tracking),
+      doesn't track dynamic library loads, and isn't container/namespace-aware.
+      <a href="https://github.com/thefoulowl/provctl/wiki/Known-Limitations-and-Roadmap">Full list and roadmap on the wiki →</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="mono">MIT licensed</div>
+    <div class="links">
+      <a href="https://github.com/thefoulowl/provctl">GitHub</a>
+      <a href="https://github.com/thefoulowl/provctl/wiki">Wiki</a>
+      <a href="https://pkg.go.dev/github.com/thefoulowl/provctl">Go Reference</a>
+      <a href="https://github.com/thefoulowl/provctl/security/policy">Security</a>
+      <a href="https://www.buymeacoffee.com/thefoulowl">Buy me a coffee</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll('.install-tabs button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.install-tabs button').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.code-block').forEach(function (c) { c.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>
