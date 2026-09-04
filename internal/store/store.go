@@ -65,6 +65,19 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1) // modernc.org/sqlite: keep writes serialized
 
+	// WAL + NORMAL sync: readers (trace/timeline/ps, run from a separate
+	// process) don't block the writer, and a single fsync now covers a
+	// whole batch instead of every individual event. `watch` runs against
+	// a live, bursty stream (a single exec can produce dozens of file
+	// opens in the same millisecond — observed in practice) where
+	// per-event fsync would otherwise be the bottleneck.
+	for _, pragma := range []string{`PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("store: %s: %w", pragma, err)
+		}
+	}
+
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: apply schema: %w", err)
@@ -74,13 +87,42 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-// Apply persists one decoded event, updating the processes table and
-// appending to the relevant event log.
+// execer is satisfied by both *sql.DB and *sql.Tx, letting apply() run
+// either standalone (Apply) or as part of a larger transaction (ApplyBatch).
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// Apply persists one decoded event in its own transaction. Prefer
+// ApplyBatch when applying many events at once (e.g. draining a channel).
 func (s *Store) Apply(e model.Event) error {
+	return apply(s.db, e)
+}
+
+// ApplyBatch persists many events as a single transaction, so a burst of
+// events costs one fsync instead of one per event.
+func (s *Store) ApplyBatch(events []model.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: begin batch: %w", err)
+	}
+	for _, e := range events {
+		if err := apply(tx, e); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func apply(q execer, e model.Event) error {
 	ts := e.Time.UnixNano()
 	switch e.Type {
 	case model.TypeFork:
-		_, err := s.db.Exec(
+		_, err := q.Exec(
 			`INSERT INTO processes (pid, ppid, comm, started_ns) VALUES (?, ?, ?, ?)
 			 ON CONFLICT (pid, started_ns) DO UPDATE SET ppid=excluded.ppid, comm=excluded.comm`,
 			e.PID, e.PPID, e.Comm, ts,
@@ -91,7 +133,7 @@ func (s *Store) Apply(e model.Event) error {
 		// A fork typically preceded this with the same pid and an earlier
 		// (or equal) started_ns; find that open lifetime row and enrich it
 		// rather than creating a second row for the same process.
-		res, err := s.db.Exec(
+		res, err := q.Exec(
 			`UPDATE processes SET ppid=?, uid=?, gid=?, comm=?, exe_path=?
 			 WHERE pid=? AND exited_ns IS NULL`,
 			e.PPID, e.UID, e.GID, e.Comm, e.Filename, e.PID,
@@ -100,7 +142,7 @@ func (s *Store) Apply(e model.Event) error {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			_, err = s.db.Exec(
+			_, err = q.Exec(
 				`INSERT INTO processes (pid, ppid, uid, gid, comm, exe_path, started_ns)
 				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 				e.PID, e.PPID, e.UID, e.GID, e.Comm, e.Filename, ts,
@@ -109,17 +151,14 @@ func (s *Store) Apply(e model.Event) error {
 		return err
 
 	case model.TypeExit:
-		_, err := s.db.Exec(
+		_, err := q.Exec(
 			`UPDATE processes SET exited_ns=?, exit_code=? WHERE pid=? AND exited_ns IS NULL`,
 			ts, e.ExitCode, e.PID,
 		)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 
 	case model.TypeFileOpen:
-		_, err := s.db.Exec(
+		_, err := q.Exec(
 			`INSERT INTO file_events (pid, path, ts_ns) VALUES (?, ?, ?)`,
 			e.PID, e.Filename, ts,
 		)
@@ -130,7 +169,7 @@ func (s *Store) Apply(e model.Event) error {
 		if e.DstIP != nil {
 			ip = e.DstIP.String()
 		}
-		_, err := s.db.Exec(
+		_, err := q.Exec(
 			`INSERT INTO net_events (pid, dst_ip, dst_port, ts_ns) VALUES (?, ?, ?, ?)`,
 			e.PID, ip, e.DstPort, ts,
 		)

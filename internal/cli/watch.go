@@ -6,10 +6,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/thefoulowl/provctl/internal/engine"
 	"github.com/thefoulowl/provctl/internal/model"
 	"github.com/thefoulowl/provctl/internal/store"
+)
+
+// Events are batched into one SQLite transaction instead of one fsync per
+// event, flushed on whichever limit hits first — this bounds both the
+// worst-case write latency (batchInterval) and memory use (batchMax) while
+// absorbing bursts (a single exec can produce dozens of file opens in the
+// same millisecond).
+const (
+	batchMax      = 256
+	batchInterval = 150 * time.Millisecond
 )
 
 func runWatch(ctx context.Context, args []string) error {
@@ -42,19 +53,37 @@ func runWatch(ctx context.Context, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "provctl: watching (db=%s) — Ctrl+C to stop\n", *dbPath)
 
+	ticker := time.NewTicker(batchInterval)
+	defer ticker.Stop()
+
+	batch := make([]model.Event, 0, batchMax)
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if err := st.ApplyBatch(batch); err != nil {
+			fmt.Fprintln(os.Stderr, "provctl: store error:", err)
+		}
+		batch = batch[:0]
+	}
+
 	for {
 		select {
 		case ev := <-events:
-			if err := st.Apply(ev); err != nil {
-				fmt.Fprintln(os.Stderr, "provctl: store error:", err)
-				continue
-			}
 			if !*quiet {
 				printEvent(ev)
 			}
+			batch = append(batch, ev)
+			if len(batch) >= batchMax {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
 		case err := <-errCh:
+			flush()
 			return err
 		case <-ctx.Done():
+			flush()
 			return nil
 		}
 	}
