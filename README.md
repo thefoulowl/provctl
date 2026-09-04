@@ -40,7 +40,15 @@ most distro kernels since ~5.8 / 2021).
 git clone https://github.com/thefoulowl/provctl
 cd provctl
 go build -o provctl ./cmd/provctl
+sudo install -Dm755 provctl /usr/local/bin/provctl
 ```
+
+The `sudo install` step matters, not just for convenience: `sudo provctl
+watch` (below) needs `provctl` on `$PATH` *as root sees it* — `sudo` resets
+`PATH` to its own `secure_path` by default, so it won't find `./provctl`
+even from the directory you built it in, and even if your own shell's
+`$PATH` includes `.`. If you'd rather not install it system-wide, run it
+with an explicit path instead: `sudo ./provctl watch`.
 
 No `clang`/`bpftool` needed to build — the compiled eBPF object and its Go
 bindings are committed (`internal/engine/probes_x86_bpfel.{go,o}`). You only
@@ -56,11 +64,14 @@ exist), root or `CAP_BPF`+`CAP_PERFMON` to run `watch`.
 # 1. Start capturing (needs root):
 sudo provctl watch
 
-# 2. In another terminal, ask questions:
+# 2. In another terminal, ask questions (no root needed):
 provctl trace /home/you/Downloads/something.zip
 provctl timeline 12345
 provctl ps
 ```
+
+(If you skipped the `sudo install` step above: use `sudo ./provctl watch`
+for step 1, and `./provctl trace/timeline/ps` for step 2.)
 
 | Command | Needs root? | What it does |
 |---|---|---|
