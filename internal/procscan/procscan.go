@@ -81,13 +81,16 @@ func scanPID(pid int, boot time.Time) (model.Event, bool) {
 		Time: boot.Add(time.Duration(startTicks) * time.Second / userHZ),
 		PID:  uint32(pid),
 		PPID: uint32(ppid),
-		Comm: comm,
+		// comm from /proc/<pid>/stat is attacker-set (prctl) and the kernel
+		// escapes only newline/NUL there, so neutralize it the same way
+		// Decode does for ring-buffer events.
+		Comm: model.SanitizeDisplay(comm),
 	}
 
 	// The executable path is unavailable for kernel threads and for
 	// processes we can't read; comm alone is still worth recording.
 	if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
-		ev.Filename = exe
+		ev.Filename = model.SanitizeDisplay(exe)
 	}
 
 	if fi, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
