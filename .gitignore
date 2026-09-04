@@ -1,0 +1,16 @@
+# Machine-generated from the local kernel's BTF; regenerate with `make vmlinux-header`.
+/internal/bpf/vmlinux.h
+
+# Build output
+/provctl
+/dist/
+
+# SQLite runtime state (default is /var/lib/provctl, but a local override
+# during development often lands here)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+/.idea/
+/.vscode/

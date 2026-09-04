@@ -1,0 +1,92 @@
+# provctl
+
+An eBPF process/file/network **provenance tracker and flight recorder** for
+Linux. One capture engine answers two questions:
+
+- **"Where did this file come from?"** — `provctl trace <path>`
+- **"What did this process do?"** — `provctl timeline <pid>`
+
+```
+$ provctl trace ~/Downloads/payload.sh
+cp (pid 132382)
+  ↓ opened /home/user/Downloads/payload.sh                (08:49:49)
+  ↓ opened by bash (pid 132380)                            (08:49:49)
+  ↓ executed as payload.sh (pid 132384)                    (08:49:49)
+        -> spawned curl (pid 132385)                       (08:49:49)
+```
+
+That output is from a real recorded run — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+for how it's reconstructed and what it can't yet track.
+
+## How it works
+
+Five eBPF hooks (`sched_process_{fork,exec,exit}`, `security_file_open`,
+`tcp_v4_connect`/`tcp_v6_connect`) feed one ring buffer. A Go daemon decodes
+that stream and persists it to SQLite. Every CLI command — `trace`,
+`timeline`, `ps` — is a query over that same store; there's no separate
+subsystem per feature. Full write-up: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+CO-RE (Compile Once – Run Everywhere) means the shipped, precompiled probes
+attach against your running kernel's BTF without needing to recompile —
+you only need a kernel exposing BTF at `/sys/kernel/btf/vmlinux` (default on
+most distro kernels since ~5.8 / 2021).
+
+## Install
+
+```sh
+git clone https://github.com/thefoulowl/provctl
+cd provctl
+go build -o provctl ./cmd/provctl
+```
+
+No `clang`/`bpftool` needed to build — the compiled eBPF object and its Go
+bindings are committed (`internal/engine/probes_x86_bpfel.{go,o}`). You only
+need those tools if you're modifying `internal/bpf/provctl.bpf.c` itself
+(see [Modifying the BPF probes](#modifying-the-bpf-probes)).
+
+Requires: Linux x86_64, kernel with BTF (`/sys/kernel/btf/vmlinux` must
+exist), root or `CAP_BPF`+`CAP_PERFMON` to run `watch`.
+
+## Usage
+
+```sh
+# 1. Start capturing (needs root):
+sudo provctl watch
+
+# 2. In another terminal, ask questions:
+provctl trace /home/you/Downloads/something.zip
+provctl timeline 12345
+provctl ps
+```
+
+| Command | Needs root? | What it does |
+|---|---|---|
+| `provctl watch [--db path] [--quiet]` | yes | Attaches the probes, streams events to stdout, persists them to SQLite. |
+| `provctl trace <path> [--db path]` | no | Reconstructs a file's provenance: who created it, who reopened it, who executed it, what that run did next. |
+| `provctl timeline <pid> [--db path]` | no | Every recorded event for one process, merged and time-sorted. |
+| `provctl ps [--db path] [--all]` | no | The recorded process tree (live only by default; `--all` includes exited processes). |
+
+Database path defaults to `/var/lib/provctl/events.db`, override with
+`--db` or `$PROVCTL_DB`. `trace`/`timeline`/`ps` only need read access to
+that file — they don't touch eBPF at all.
+
+## Modifying the BPF probes
+
+```sh
+sudo dnf install clang llvm libbpf-devel elfutils-libelf-devel bpftool   # Fedora
+# or: sudo apt install clang libbpf-dev bpftool                         # Debian/Ubuntu
+
+make generate   # regenerates vmlinux.h from your kernel's BTF, recompiles
+                # provctl.bpf.c, regenerates internal/engine/probes_x86_bpfel.{go,o}
+make build
+```
+
+## Limitations
+
+v1 matches file provenance by exact path string (no inode/rename tracking),
+doesn't track dynamic library loads, and isn't container/namespace-aware.
+Full list in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#known-limitations-v1).
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
