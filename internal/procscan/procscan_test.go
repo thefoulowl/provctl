@@ -12,7 +12,7 @@ func TestParseStat(t *testing.T) {
 		name      string
 		line      string
 		wantComm  string
-		wantPPID  int
+		wantPPID  uint32
 		wantStart uint64
 		wantErr   bool
 	}{
