@@ -106,6 +106,7 @@ func (s *Store) Close() error { return s.db.Close() }
 type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	QueryRow(query string, args ...any) *sql.Row
+	Query(query string, args ...any) (*sql.Rows, error)
 }
 
 // Apply persists one live-observed event in its own transaction, including
@@ -181,20 +182,36 @@ func apply(q execer, e model.Event) error {
 // the resolved absolute path. Best-effort, consistent with the rest of
 // Provenance's matching — falls back to the raw path when no such row
 // exists (e.g. a statically-invoked ELF the kernel didn't need to reopen).
+//
+// Matching happens in Go against an exact basename, not a SQL LIKE
+// pattern: LIKE treats '%' and '_' as wildcards even inside a bound
+// parameter (parameterization stops SQL injection, not LIKE's own
+// wildcard semantics), and the basename comes straight from the raw,
+// attacker-controlled execve() argument. A process exec'ing a path whose
+// basename was literally "%" could otherwise steer this to match any
+// row for its own pid — reported and confirmed independently — letting
+// it misattribute its own exe_path to an unrelated file it merely opened.
 func resolveExecPath(q execer, e model.Event) string {
 	if strings.HasPrefix(e.Filename, "/") {
 		return e.Filename
 	}
 	base := path.Base(strings.TrimPrefix(e.Filename, "./"))
-	var resolved string
-	err := q.QueryRow(
-		`SELECT path FROM file_events WHERE pid=? AND path LIKE '%/' || ? ORDER BY ts_ns ASC LIMIT 1`,
-		e.PID, base,
-	).Scan(&resolved)
+
+	rows, err := q.Query(`SELECT path FROM file_events WHERE pid=? ORDER BY ts_ns ASC`, e.PID)
 	if err != nil {
 		return e.Filename
 	}
-	return resolved
+	defer rows.Close()
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return e.Filename
+		}
+		if path.Base(p) == base {
+			return p
+		}
+	}
+	return e.Filename
 }
 
 func applyCore(q execer, e model.Event) error {

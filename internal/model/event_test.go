@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 	"time"
 )
@@ -190,6 +191,44 @@ func TestDecodeUnterminatedStrings(t *testing.T) {
 	}
 	if ev.Comm != full {
 		t.Errorf("Comm = %q, want %q", ev.Comm, full)
+	}
+}
+
+// Regression test for GHSA-7q6w-fvrx-6pqq (credit: EPHAK): comm and
+// filename are attacker-controlled (comm via prctl(PR_SET_NAME) or
+// argv[0]; filename via any path component the kernel accepts, barring
+// '/' and NUL) and previously passed through Decode/Describe verbatim,
+// letting an unprivileged process inject terminal escape sequences into
+// watch's live stdout and into the persisted store later replayed by
+// trace/timeline/ps/top. This is the reporter's own PoC input.
+func TestDecodeSanitizesControlBytes(t *testing.T) {
+	raw := buildRecord(rawEvent{
+		typ:      uint8(TypeExec),
+		pid:      1337,
+		comm:     "\x1b[2K\rsshd",
+		filename: "\x1b]52;c;cHduZWQ=\x07/loot",
+	})
+
+	ev, err := Decode(raw, Clock{})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	for _, s := range []string{ev.Comm, ev.Filename, ev.Describe()} {
+		for _, r := range s {
+			if r == '�' || r == '\t' {
+				continue
+			}
+			if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+				t.Fatalf("control byte %U survived sanitization in %q", r, s)
+			}
+		}
+	}
+	if !strings.Contains(ev.Comm, "sshd") {
+		t.Errorf("Comm = %q, expected the legitimate text (sshd) to survive alongside the substitution", ev.Comm)
+	}
+	if !strings.Contains(ev.Filename, "/loot") {
+		t.Errorf("Filename = %q, expected the legitimate text (/loot) to survive alongside the substitution", ev.Filename)
 	}
 }
 

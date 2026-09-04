@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -117,8 +118,8 @@ func Decode(raw []byte, clock Clock) (Event, error) {
 		UID:      binary.LittleEndian.Uint32(raw[offUid:]),
 		GID:      binary.LittleEndian.Uint32(raw[offGid:]),
 		ExitCode: binary.LittleEndian.Uint32(raw[offExitCode:]),
-		Comm:     cString(raw[offComm : offComm+commLen]),
-		Filename: cString(raw[offFilename : offFilename+filenameLen]),
+		Comm:     sanitizeField(cString(raw[offComm : offComm+commLen])),
+		Filename: sanitizeField(cString(raw[offFilename : offFilename+filenameLen])),
 	}
 
 	if e.Type == TypeConnect {
@@ -134,6 +135,30 @@ func Decode(raw []byte, clock Clock) (Event, error) {
 	}
 
 	return e, nil
+}
+
+// sanitizeField neutralizes terminal control/escape bytes in kernel-supplied
+// strings (comm, filename) before they can reach anywhere that renders as
+// text: watch's live stdout, the SQLite store, and every read-only viewer
+// that plays that store back (trace/timeline/ps/top). comm is attacker-set
+// via prctl(PR_SET_NAME) or argv[0], and a path component can hold any byte
+// except '/' and NUL — the kernel itself does not filter ESC, CR, or BEL —
+// so an unprivileged process can otherwise inject ANSI/OSC sequences into a
+// higher-privileged operator's terminal (this exact path was reported,
+// reproduced, and credited: GHSA-7q6w-fvrx-6pqq).
+//
+// This only ever narrows what's displayed, never widens it: every C0
+// control below 0x20 (tab excepted, which drives no terminal behavior) and
+// every C1 control (0x80-0x9F) becomes U+FFFD. It does not touch the raw
+// bytes stored anywhere else — this runs once, in Decode, before an Event
+// exists at all, so there's no unsanitized copy to reach any sink from.
+func sanitizeField(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r <= 0x9f)) {
+			return r
+		}
+		return '\uFFFD' // Unicode replacement character
+	}, s)
 }
 
 // cString trims a fixed-width, NUL-padded C char array to a Go string.

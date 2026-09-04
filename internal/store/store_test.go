@@ -280,6 +280,34 @@ func TestExecWithRelativePathNoMatchKeepsRawPath(t *testing.T) {
 	}
 }
 
+// Regression test: resolveExecPath used to match candidate file_events
+// rows with a SQL LIKE pattern built from the raw, attacker-controlled
+// exec basename. LIKE treats '%' and '_' as wildcards even inside a bound
+// parameter, so a process exec'ing a path whose basename was literally
+// "%" could match *any* file_events row for its own pid and get its
+// exe_path steered to an unrelated file it merely opened earlier.
+func TestResolveExecPathIgnoresLikeWildcardsInBasename(t *testing.T) {
+	st := newTestStore(t)
+	applyAll(t, st,
+		model.Event{Type: model.TypeFork, Time: at(0), PID: 900, PPID: 1, Comm: "attacker"},
+		// An unrelated file this same pid merely opened, well before exec.
+		model.Event{Type: model.TypeFileOpen, Time: at(time.Millisecond), PID: 900, Filename: "/etc/passwd"},
+		// Exec target's basename is a bare '%', a SQL LIKE wildcard.
+		model.Event{Type: model.TypeExec, Time: at(2 * time.Millisecond), PID: 900, PPID: 1,
+			Comm: "%", Filename: "./%"},
+	)
+	p, err := st.LatestProcess(900)
+	if err != nil {
+		t.Fatalf("LatestProcess: %v", err)
+	}
+	if p.ExePath == "/etc/passwd" {
+		t.Fatalf("ExePath = %q: wildcard basename steered resolution to an unrelated file", p.ExePath)
+	}
+	if p.ExePath != "./%" {
+		t.Errorf("ExePath = %q, want the unresolved raw path %q kept as a fallback (no real basename match exists)", p.ExePath, "./%")
+	}
+}
+
 func TestExitClosesOnlyNewestLifetime(t *testing.T) {
 	st := newTestStore(t)
 	applyAll(t, st,
