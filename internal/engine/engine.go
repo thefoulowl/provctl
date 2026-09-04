@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -23,10 +24,19 @@ import (
 // live attachments, and the ring buffer reader. Call Close to tear
 // everything down and detach cleanly.
 type Engine struct {
-	objs  ProbesObjects
-	links []link.Link
-	rd    *ringbuf.Reader
-	clock model.Clock
+	objs      ProbesObjects
+	links     []link.Link
+	rd        *ringbuf.Reader
+	clock     model.Clock
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// closeReader closes the ring buffer reader exactly once. Both the
+// context-cancellation goroutine in Events and Close race to do this.
+func (e *Engine) closeReader() error {
+	e.closeOnce.Do(func() { e.closeErr = e.rd.Close() })
+	return e.closeErr
 }
 
 // Open loads the BPF object, attaches every probe, and opens the ring
@@ -132,9 +142,17 @@ func (e *Engine) attachAll() error {
 // Events streams decoded events until ctx is cancelled or Close is called.
 // It is meant to be run from a single goroutine.
 func (e *Engine) Events(ctx context.Context, out chan<- model.Event) error {
+	// Unblock the blocking Read below when the caller cancels. stopped
+	// lets this goroutine exit if Events returns for any other reason
+	// (a read error), rather than lingering until process teardown.
+	stopped := make(chan struct{})
+	defer close(stopped)
 	go func() {
-		<-ctx.Done()
-		e.rd.Close()
+		select {
+		case <-ctx.Done():
+			e.closeReader()
+		case <-stopped:
+		}
 	}()
 
 	for {
@@ -160,10 +178,13 @@ func (e *Engine) Events(ctx context.Context, out chan<- model.Event) error {
 }
 
 // Close detaches every probe and releases the ring buffer and map fds.
+// Safe to call after Events has already returned: the reader is closed at
+// most once, so the usual `defer eng.Close()` alongside a cancelled
+// context doesn't report a spurious "already closed" error.
 func (e *Engine) Close() error {
 	var errs []error
 	if e.rd != nil {
-		if err := e.rd.Close(); err != nil {
+		if err := e.closeReader(); err != nil {
 			errs = append(errs, err)
 		}
 	}

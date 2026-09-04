@@ -7,7 +7,7 @@ License:        MIT
 URL:            https://github.com/thefoulowl/provctl
 Source0:        https://github.com/thefoulowl/provctl/archive/refs/tags/v%{version}.tar.gz
 
-BuildRequires:  golang >= 1.23
+BuildRequires:  golang >= 1.25
 Requires:       kernel >= 5.8
 
 %description

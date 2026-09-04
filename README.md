@@ -24,7 +24,10 @@ Five eBPF hooks (`sched_process_{fork,exec,exit}`, `security_file_open`,
 `tcp_v4_connect`/`tcp_v6_connect`) feed one ring buffer. A Go daemon decodes
 that stream and persists it to SQLite. Every CLI command — `trace`,
 `timeline`, `ps` — is a query over that same store; there's no separate
-subsystem per feature. Full write-up: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+subsystem per feature. On startup `watch` also seeds the store from `/proc`,
+so events from processes that were already running (your shell, your browser)
+are attributed to a named process rather than a bare pid. Full write-up:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 CO-RE (Compile Once – Run Everywhere) means the shipped, precompiled probes
 attach against your running kernel's BTF without needing to recompile —

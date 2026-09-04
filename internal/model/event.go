@@ -7,10 +7,10 @@
 package model
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 )
 
@@ -136,8 +136,12 @@ func Decode(raw []byte, clock Clock) (Event, error) {
 	return e, nil
 }
 
+// cString trims a fixed-width, NUL-padded C char array to a Go string.
+// Searching the byte slice directly matters here: this runs twice per
+// event (comm + filename), and converting to string first would copy all
+// 264 filename bytes just to locate the terminator.
 func cString(b []byte) string {
-	if i := strings.IndexByte(string(b), 0); i >= 0 {
+	if i := bytes.IndexByte(b, 0); i >= 0 {
 		return string(b[:i])
 	}
 	return string(b)

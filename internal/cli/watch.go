@@ -10,6 +10,7 @@ import (
 
 	"github.com/thefoulowl/provctl/internal/engine"
 	"github.com/thefoulowl/provctl/internal/model"
+	"github.com/thefoulowl/provctl/internal/procscan"
 	"github.com/thefoulowl/provctl/internal/store"
 )
 
@@ -40,6 +41,17 @@ func runWatch(ctx context.Context, args []string) error {
 		return err
 	}
 	defer st.Close()
+
+	// Seed the store with processes that already exist, so events from
+	// long-lived processes (shells, browsers) can be attributed to a named
+	// process instead of a bare pid we never saw start.
+	if snapshot, err := procscan.Snapshot(os.Getpid()); err != nil {
+		fmt.Fprintln(os.Stderr, "provctl: /proc snapshot failed, pre-existing processes will show as bare pids:", err)
+	} else if err := st.ApplyBatch(snapshot); err != nil {
+		return fmt.Errorf("cli: seed store from /proc: %w", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "provctl: seeded %d already-running processes from /proc\n", len(snapshot))
+	}
 
 	eng, err := engine.Open()
 	if err != nil {

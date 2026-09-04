@@ -50,6 +50,13 @@ expose the same fields, without recompiling per-target.
 
 ## Event flow
 
+0. At startup, `watch` snapshots `/proc` (`internal/procscan`) and seeds the
+   store with one synthetic exec record per already-running process, using
+   each process's real start time (`btime` + `starttime`). Without this, the
+   first events a fresh daemon sees come from pids it never watched start —
+   so `trace` could report that a path was opened but not by whom, which is
+   the whole question it exists to answer. Most activity right after startup
+   comes from long-lived processes (shells, browsers, desktop apps).
 1. Each hook fills a `struct event` (`internal/bpf/provctl.h`) with a
    timestamp, identity (pid/ppid/uid/gid/comm), and a type-specific payload
    (exec path, opened path, or destination address), and submits it to a

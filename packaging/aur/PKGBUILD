@@ -7,7 +7,7 @@ arch=('x86_64')
 url="https://github.com/thefoulowl/provctl"
 license=('MIT')
 depends=()
-makedepends=('go>=1.23')
+makedepends=('go>=1.25')
 optdepends=('systemd: run provctl watch as a service')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/thefoulowl/provctl/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP') # replace with the real digest before submitting to the AUR — see packaging/README.md

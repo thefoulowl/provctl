@@ -22,6 +22,13 @@ func runTrace(args []string) error {
 	if err != nil {
 		return err
 	}
+	// bpf_d_path() records fully resolved kernel paths, so a symlinked
+	// argument would never match. Resolve it when we can — but fall back
+	// to the absolute path when we can't, which is the *normal* forensic
+	// case: the file being traced has often already been deleted.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {

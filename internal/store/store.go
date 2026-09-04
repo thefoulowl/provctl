@@ -133,10 +133,19 @@ func apply(q execer, e model.Event) error {
 		// A fork typically preceded this with the same pid and an earlier
 		// (or equal) started_ns; find that open lifetime row and enrich it
 		// rather than creating a second row for the same process.
+		//
+		// Scoped to the *most recent* open lifetime, not every open row
+		// for this pid: if an exit event was ever missed (a full ring
+		// buffer drops events) that stale row stays open forever, and once
+		// the kernel recycles the pid an unscoped UPDATE would rewrite the
+		// old process's identity with this new binary's — silently
+		// misattributing everything the old process did.
 		res, err := q.Exec(
 			`UPDATE processes SET ppid=?, uid=?, gid=?, comm=?, exe_path=?
-			 WHERE pid=? AND exited_ns IS NULL`,
-			e.PPID, e.UID, e.GID, e.Comm, e.Filename, e.PID,
+			 WHERE pid=? AND started_ns = (
+			     SELECT MAX(started_ns) FROM processes WHERE pid=? AND exited_ns IS NULL
+			 )`,
+			e.PPID, e.UID, e.GID, e.Comm, e.Filename, e.PID, e.PID,
 		)
 		if err != nil {
 			return err
@@ -151,9 +160,14 @@ func apply(q execer, e model.Event) error {
 		return err
 
 	case model.TypeExit:
+		// Same scoping rationale as EXEC above: close only the newest open
+		// lifetime, so a recycled pid can't retroactively close a stale row.
 		_, err := q.Exec(
-			`UPDATE processes SET exited_ns=?, exit_code=? WHERE pid=? AND exited_ns IS NULL`,
-			ts, e.ExitCode, e.PID,
+			`UPDATE processes SET exited_ns=?, exit_code=?
+			 WHERE pid=? AND started_ns = (
+			     SELECT MAX(started_ns) FROM processes WHERE pid=? AND exited_ns IS NULL
+			 )`,
+			ts, e.ExitCode, e.PID, e.PID,
 		)
 		return err
 
