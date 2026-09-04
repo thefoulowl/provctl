@@ -43,17 +43,34 @@ go build -o provctl ./cmd/provctl
 sudo install -Dm755 provctl /usr/local/bin/provctl
 ```
 
-The `sudo install` step matters, not just for convenience: `sudo provctl
-watch` (below) needs `provctl` on `$PATH` *as root sees it* — `sudo` resets
-`PATH` to its own `secure_path` by default, so it won't find `./provctl`
-even from the directory you built it in, and even if your own shell's
-`$PATH` includes `.`. If you'd rather not install it system-wide, run it
-with an explicit path instead: `sudo ./provctl watch`.
+This makes `provctl` available globally — for every user, and for `sudo` —
+in one step: `/usr/local/bin` is both on a normal user's default `$PATH`
+*and* in `sudo`'s `secure_path`. That second part is the one that actually
+matters here: `sudo` resets `PATH` to its own fixed `secure_path` and
+ignores your shell's, so `sudo provctl watch` (below) would not find the
+binary if it only lived somewhere user-specific like `~/go/bin` — it has to
+be installed to a system location like `/usr/local/bin` to work under
+`sudo` at all.
 
 No `clang`/`bpftool` needed to build — the compiled eBPF object and its Go
 bindings are committed (`internal/engine/probes_x86_bpfel.{go,o}`). You only
 need those tools if you're modifying `internal/bpf/provctl.bpf.c` itself
 (see [Modifying the BPF probes](#modifying-the-bpf-probes)).
+
+**Alternative: `go install`.** If you have Go set up and just want the
+binary without cloning:
+
+```sh
+go install github.com/thefoulowl/provctl/cmd/provctl@latest
+```
+
+This puts it in `$(go env GOPATH)/bin` (usually `~/go/bin`) — make sure
+that's on your `$PATH` for your own `provctl trace/timeline/ps` to resolve,
+and note it will **not** work with `sudo provctl watch` for the reason
+above (`~/go/bin` isn't in `secure_path`); either run
+`sudo $(go env GOPATH)/bin/provctl watch`, or additionally copy/symlink the
+binary into `/usr/local/bin` if you want the plain `sudo provctl watch`
+form to work too.
 
 Requires: Linux x86_64, kernel with BTF (`/sys/kernel/btf/vmlinux` must
 exist), root or `CAP_BPF`+`CAP_PERFMON` to run `watch`.
