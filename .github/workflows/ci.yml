@@ -54,10 +54,12 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Install clang + libbpf headers
+      # llvm (not just clang) is required for llvm-strip, which bpf2go
+      # shells out to for stripping DWARF from the compiled BPF object.
+      - name: Install clang + llvm + libbpf headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libbpf-dev
+          sudo apt-get install -y clang llvm libbpf-dev
 
       # apt's bpftool (via linux-tools-generic) is a dispatcher that shells
       # out to a kernel-version-specific package which usually doesn't
