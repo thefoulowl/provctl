@@ -1,13 +1,5 @@
 provctl (0.1.1-1) unstable; urgency=medium
 
-  * First installable release. 0.1.0 declared a Go toolchain constraint it
-    could not satisfy (go.mod required 1.26 while Build-Depends allowed
-    1.23) and carried a pid-reuse misattribution bug; do not package it.
-
- -- thefoulowl <thefoulowl@proton.me>  Fri, 04 Sep 2026 09:30:00 +0530
-
-provctl (0.1.0-1) unstable; urgency=medium
-
   * Initial release.
 
- -- thefoulowl <thefoulowl@proton.me>  Fri, 04 Sep 2026 08:30:00 +0530
+ -- thefoulowl <thefoulowl@proton.me>  Fri, 04 Sep 2026 09:30:00 +0530

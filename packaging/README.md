@@ -43,7 +43,7 @@ Before submitting to the AUR: replace `sha256sums=('SKIP')` with the real
 digest of the release tarball:
 
 ```sh
-curl -sL https://github.com/thefoulowl/provctl/archive/refs/tags/v0.1.0.tar.gz | sha256sum
+curl -sL https://github.com/thefoulowl/provctl/archive/refs/tags/v0.1.1.tar.gz | sha256sum
 ```
 
 ## Releasing a new version
