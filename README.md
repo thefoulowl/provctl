@@ -4,6 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/thefoulowl/provctl.svg)](https://pkg.go.dev/github.com/thefoulowl/provctl)
 [![License: MIT](https://img.shields.io/github/license/thefoulowl/provctl)](LICENSE)
 [![Latest tag](https://img.shields.io/github/v/tag/thefoulowl/provctl)](https://github.com/thefoulowl/provctl/tags)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/thefoulowl)
 
 An eBPF process/file/network **provenance tracker and flight recorder** for
 Linux. One capture engine answers two questions:
@@ -123,6 +124,11 @@ make build
 v1 matches file provenance by exact path string (no inode/rename tracking),
 doesn't track dynamic library loads, and isn't container/namespace-aware.
 Full list in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#known-limitations-v1).
+
+## Support
+
+If provctl is useful to you, a [coffee](https://www.buymeacoffee.com/thefoulowl)
+helps keep it maintained.
 
 ## License
 
