@@ -109,6 +109,16 @@ int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
 	e->timestamp_ns = bpf_ktime_get_ns();
 	fill_identity(e);
 
+	// This is the raw execve() argument, exactly as invoked -- it can be
+	// relative ("./payload.sh") or a bare name found via $PATH, unlike
+	// every other path provctl records (file opens), which are resolved
+	// via bpf_d_path(). bpf_d_path() itself isn't callable from a
+	// tracepoint program (verifier: "program of this type cannot use
+	// helper bpf_d_path" -- confirmed on this kernel; it's only permitted
+	// from fentry/LSM-style attachments like security_file_open's).
+	// Relative-path resolution instead happens in store.applyCore, by
+	// correlating against the already-resolved security_file_open record
+	// for the same pid.
 	unsigned int fname_off = ctx->__data_loc_filename & 0xFFFF;
 	bpf_probe_read_str(&e->filename, sizeof(e->filename), (void *)ctx + fname_off);
 

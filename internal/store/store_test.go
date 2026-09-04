@@ -210,6 +210,76 @@ func TestPIDReuseDoesNotRewriteEarlierLifetime(t *testing.T) {
 }
 
 // Likewise, an exit must close only the newest open lifetime.
+// Regression test: reproduces a real bug found while building a demo of
+// this exact scenario. The kernel's exec tracepoint reports the raw
+// execve() argument verbatim -- for `./payload.sh`, that's the literal
+// relative string, not an absolute path -- while Provenance (via
+// ExecEventsForPath) matches on an exact absolute path. Left unresolved,
+// this silently drops "who executed this, and what did that run do next"
+// for the ordinary case of running a local script or binary, which is
+// most of them. security_file_open, by contrast, is always resolved by
+// the kernel via bpf_d_path() before it reaches us.
+func TestExecWithRelativePathResolvesViaFileOpen(t *testing.T) {
+	st := newTestStore(t)
+	const absPath = "/home/user/demo/payload.sh"
+
+	applyAll(t, st,
+		model.Event{Type: model.TypeFork, Time: at(0), PID: 700, PPID: 1, Comm: "bash"},
+		// The kernel opens a script twice while resolving its shebang
+		// (observed directly): once to detect the interpreter, again to
+		// load it as the interpreter's argument. Both carry the fully
+		// resolved absolute path.
+		model.Event{Type: model.TypeFileOpen, Time: at(1 * time.Millisecond), PID: 700, Filename: absPath},
+		model.Event{Type: model.TypeFileOpen, Time: at(2 * time.Millisecond), PID: 700, Filename: absPath},
+		// The exec event itself reports only the raw, relative argument.
+		model.Event{Type: model.TypeExec, Time: at(3 * time.Millisecond), PID: 700, PPID: 1,
+			Comm: "payload.sh", Filename: "./payload.sh"},
+	)
+
+	p, err := st.LatestProcess(700)
+	if err != nil {
+		t.Fatalf("LatestProcess: %v", err)
+	}
+	if p.ExePath != absPath {
+		t.Errorf("ExePath = %q, want resolved %q", p.ExePath, absPath)
+	}
+
+	// And the whole point: Provenance must now find this execution when
+	// asked about the absolute path.
+	hops, err := st.Provenance(absPath)
+	if err != nil {
+		t.Fatalf("Provenance: %v", err)
+	}
+	var sawExec bool
+	for _, h := range hops {
+		if strings.Contains(h.Text, "executed as") {
+			sawExec = true
+		}
+	}
+	if !sawExec {
+		t.Error("Provenance chain has no \"executed as\" hop despite a matching relative-path exec")
+	}
+}
+
+// When no matching file_events row exists (e.g. a statically invoked ELF
+// the kernel never had to reopen), the raw path is kept as-is rather than
+// silently dropped or left empty.
+func TestExecWithRelativePathNoMatchKeepsRawPath(t *testing.T) {
+	st := newTestStore(t)
+	applyAll(t, st,
+		model.Event{Type: model.TypeFork, Time: at(0), PID: 800, PPID: 1, Comm: "sh"},
+		model.Event{Type: model.TypeExec, Time: at(time.Millisecond), PID: 800, PPID: 1,
+			Comm: "a.out", Filename: "./a.out"},
+	)
+	p, err := st.LatestProcess(800)
+	if err != nil {
+		t.Fatalf("LatestProcess: %v", err)
+	}
+	if p.ExePath != "./a.out" {
+		t.Errorf("ExePath = %q, want the unresolved raw path %q kept as a fallback", p.ExePath, "./a.out")
+	}
+}
+
 func TestExitClosesOnlyNewestLifetime(t *testing.T) {
 	st := newTestStore(t)
 	applyAll(t, st,

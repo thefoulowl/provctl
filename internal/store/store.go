@@ -7,7 +7,9 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"path"
 	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
@@ -103,6 +105,7 @@ func (s *Store) Close() error { return s.db.Close() }
 // either standalone (Apply) or as part of a larger transaction (ApplyBatch).
 type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
 }
 
 // Apply persists one live-observed event in its own transaction, including
@@ -159,6 +162,41 @@ func apply(q execer, e model.Event) error {
 	return err
 }
 
+// resolveExecPath returns an absolute path for e's exec target when
+// possible. The raw execve() argument the kernel reports can be relative
+// ("./payload.sh") or a bare $PATH-resolved name — unlike every other path
+// provctl records, which is resolved by the kernel via bpf_d_path() at
+// capture time. (bpf_d_path() itself isn't callable from the exec
+// tracepoint's program type — confirmed against the verifier, which
+// rejects it there and permits it only from fentry/LSM-style attachments
+// like security_file_open's — so this can't be fixed in eBPF and has to
+// happen here instead.)
+//
+// A relative exec path silently drops "who ran this, and what did that
+// run do next" from Provenance, since it queries by exact absolute path.
+// To recover it, this correlates against security_file_open records for
+// the same pid: the kernel opens a script twice while resolving its
+// shebang (observed directly while testing), so a file_events row for
+// this pid whose path ends in the same basename is strong evidence of
+// the resolved absolute path. Best-effort, consistent with the rest of
+// Provenance's matching — falls back to the raw path when no such row
+// exists (e.g. a statically-invoked ELF the kernel didn't need to reopen).
+func resolveExecPath(q execer, e model.Event) string {
+	if strings.HasPrefix(e.Filename, "/") {
+		return e.Filename
+	}
+	base := path.Base(strings.TrimPrefix(e.Filename, "./"))
+	var resolved string
+	err := q.QueryRow(
+		`SELECT path FROM file_events WHERE pid=? AND path LIKE '%/' || ? ORDER BY ts_ns ASC LIMIT 1`,
+		e.PID, base,
+	).Scan(&resolved)
+	if err != nil {
+		return e.Filename
+	}
+	return resolved
+}
+
 func applyCore(q execer, e model.Event) error {
 	ts := e.Time.UnixNano()
 	switch e.Type {
@@ -181,12 +219,13 @@ func applyCore(q execer, e model.Event) error {
 		// the kernel recycles the pid an unscoped UPDATE would rewrite the
 		// old process's identity with this new binary's — silently
 		// misattributing everything the old process did.
+		execPath := resolveExecPath(q, e)
 		res, err := q.Exec(
 			`UPDATE processes SET ppid=?, uid=?, gid=?, comm=?, exe_path=?
 			 WHERE pid=? AND started_ns = (
 			     SELECT MAX(started_ns) FROM processes WHERE pid=? AND exited_ns IS NULL
 			 )`,
-			e.PPID, e.UID, e.GID, e.Comm, e.Filename, e.PID, e.PID,
+			e.PPID, e.UID, e.GID, e.Comm, execPath, e.PID, e.PID,
 		)
 		if err != nil {
 			return err
@@ -195,7 +234,7 @@ func applyCore(q execer, e model.Event) error {
 			_, err = q.Exec(
 				`INSERT INTO processes (pid, ppid, uid, gid, comm, exe_path, started_ns)
 				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				e.PID, e.PPID, e.UID, e.GID, e.Comm, e.Filename, ts,
+				e.PID, e.PPID, e.UID, e.GID, e.Comm, execPath, ts,
 			)
 		}
 		return err
