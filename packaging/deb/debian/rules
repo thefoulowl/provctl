@@ -1,0 +1,20 @@
+#!/usr/bin/make -f
+
+export CGO_ENABLED=0
+export GOFLAGS=-mod=mod
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	go build -o provctl ./cmd/provctl
+
+override_dh_auto_install:
+	install -Dm755 provctl debian/provctl/usr/bin/provctl
+	install -Dm644 packaging/systemd/provctl.service debian/provctl/lib/systemd/system/provctl.service
+
+override_dh_auto_test:
+	# no-op: the module's own test suite (go test ./...) needs no
+	# network access to build, but packaging environments commonly
+	# sandbox network access, so skip rather than risk a spurious
+	# build failure unrelated to the package itself.

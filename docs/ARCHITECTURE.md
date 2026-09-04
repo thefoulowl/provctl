@@ -61,7 +61,12 @@ expose the same fields, without recompiling per-target.
    decode error.
 3. `store.Store` persists every event to SQLite: one `processes` row per
    process *lifetime* (keyed by `(pid, started_ns)` since pids get reused),
-   plus append-only `file_events` and `net_events` logs.
+   plus append-only `file_events` and `net_events` logs. The database runs
+   in WAL mode with `synchronous=NORMAL`, and `watch` batches events into
+   one transaction per 150ms (or 256 events, whichever comes first) instead
+   of committing each event individually — a single `execve()` can produce
+   dozens of file-open events in the same millisecond, and per-event fsync
+   would otherwise make the store the bottleneck.
 4. The CLI subcommands are pure queries over that store:
    - **`trace <path>`** — find the earliest open of the path, the process
      that did it, and what that process connected to just before (the

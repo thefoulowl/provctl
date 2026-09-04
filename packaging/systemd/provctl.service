@@ -1,0 +1,26 @@
+[Unit]
+Description=provctl - eBPF process/file/network provenance capture
+Documentation=https://github.com/thefoulowl/provctl
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/provctl watch --quiet
+Restart=on-failure
+RestartSec=5s
+
+# provctl needs to load fentry/tracing programs and tracepoints. The
+# capability set below is the documented minimum for recent kernels
+# (CAP_BPF + CAP_PERFMON, split out from CAP_SYS_ADMIN since 5.8) but has
+# not been verified capability-scoped end to end — only as root. If probe
+# attachment fails under this unit, comment out the four capability lines
+# below and set `User=root` instead.
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/provctl
+StateDirectory=provctl
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+Source: provctl
+Section: admin
+Priority: optional
+Maintainer: thefoulowl <thefoulowl@proton.me>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.23~)
+Standards-Version: 4.6.2
+Homepage: https://github.com/thefoulowl/provctl
+
+Package: provctl
+Architecture: amd64
+Depends: ${misc:Depends}
+Description: eBPF process/file/network provenance tracker and flight recorder
+ provctl captures process, file, and network events via eBPF (CO-RE:
+ sched_process_fork/exec/exit, security_file_open, tcp_v4/v6_connect) and
+ persists them to SQLite, so you can later ask "where did this file come
+ from" (provctl trace) and "what did this process do" (provctl timeline).
+ .
+ The eBPF probes are precompiled and committed upstream, so building this
+ package only requires a Go toolchain, not clang/bpftool. Running
+ `provctl watch` requires root (or CAP_BPF+CAP_PERFMON) and a kernel
+ exposing BTF at /sys/kernel/btf/vmlinux (5.8+).
