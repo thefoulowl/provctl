@@ -54,11 +54,28 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Install clang + libbpf headers + bpftool
+      - name: Install clang + libbpf headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libbpf-dev linux-tools-common linux-tools-generic bpftool || \
           sudo apt-get install -y clang libbpf-dev
+
+      # apt's bpftool (via linux-tools-generic) is a dispatcher that shells
+      # out to a kernel-version-specific package which usually doesn't
+      # exist for the runner's kernel (e.g. linux-tools-6.17.0-1022-azure).
+      # The upstream project ships a standalone static binary instead,
+      # which works on any kernel — use that. Its release asset names are
+      # versioned (bpftool-vX.Y.Z-amd64.tar.gz), so resolve the current
+      # one via the API rather than hardcoding a filename that breaks on
+      # the next bpftool release.
+      - name: Install static bpftool
+        run: |
+          url=$(curl -sSL https://api.github.com/repos/libbpf/bpftool/releases/latest \
+            | grep -o '"browser_download_url": *"[^"]*-amd64\.tar\.gz"' \
+            | grep -o 'https://[^"]*')
+          curl -sSL -o /tmp/bpftool.tar.gz "$url"
+          sudo tar -xzf /tmp/bpftool.tar.gz -C /usr/local/bin bpftool
+          sudo chmod +x /usr/local/bin/bpftool
+          bpftool version
 
       - name: Regenerate BPF bindings
         run: make generate
